@@ -5,6 +5,7 @@ import sys
 import re
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
+import warnings
 
 from six import u, iteritems, PY2
 
@@ -100,6 +101,60 @@ class TestSuite(object):
         self.stdout = stdout
         self.stderr = stderr
         self.properties = properties
+
+    @classmethod
+    def from_file(cls, xml_file):
+        """
+        Parses an XML document from a file
+        @param xml_file: File-like object containing JUnit XML
+        @return A list of parsed TestSuite object
+        """
+        root = ET.parse(xml_file).getroot()
+        if root.tag != 'testsuites':
+            raise ValueError('XML root element is "{}", expect "testsuites"'
+                             .format(root.tag))
+
+        # Helper to raise an error if an element doesn't have an expected
+        # attribute
+        def check_attrib(elem, attrib):
+            if attrib not in elem.attrib:
+                raise ValueError('Got "{}" elem with no "{}" attribute'.format(
+                    elem.tag, attrib))
+
+        test_suites = []
+        for child in root:
+            if child.tag != 'testsuite':
+                warnings.warn(
+                    'Skipping element with unknown tag "{}", expect "testsuite"'
+                    .format(child.tag))
+                continue
+
+            test_suite_elem = child
+
+            test_cases = []
+            for child in test_suite_elem:
+                if child.tag != 'testcase':
+                    warnings.warn(
+                        'Skipping element with unknown tag "{}", expect "testcase"'
+                        .format(child.tag))
+                    continue
+
+                test_case_elem = child
+                check_attrib(test_case_elem, 'name')
+
+                test_case = TestCase(test_case_elem.attrib['name'])
+                for child in test_case_elem:
+                    if child.tag == 'failure':
+                        failure_elem = child
+                        check_attrib(failure_elem, 'message')
+                        test_case.add_failure_info(failure_elem.attrib['message'])
+                test_cases.append(test_case)
+
+            check_attrib(test_suite_elem, 'name')
+            test_suites.append(cls(test_suite_elem.attrib['name'],
+                                   test_cases=test_cases))
+
+        return test_suites
 
     def build_xml_doc(self, encoding=None):
         """
